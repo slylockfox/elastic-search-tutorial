@@ -5,11 +5,13 @@ from search import Search
 app = Flask(__name__)
 es = Search()
 
+# @app.route("/")
+# def hello_world():
+#     return "<p>Hello, World!</p>"
 
 @app.get('/')
 def index():
     return render_template('index.html')
-
 
 @app.post('/')
 def handle_search():
@@ -23,6 +25,7 @@ def handle_search():
                 'multi_match': {
                     'query': parsed_query,
                     'fields': ['name', 'summary', 'content'],
+                'operator':   'and'
                 }
             }
         }
@@ -58,17 +61,33 @@ def handle_search():
         from_=from_
     )
 
-    aggs = {
-        'Category': {
-            bucket['key']: bucket['doc_count']
-            for bucket in results['aggregations']['category-agg']['buckets']
-        },
-        'Year': {
-            bucket['key_as_string']: bucket['doc_count']
-            for bucket in results['aggregations']['year-agg']['buckets']
-            if bucket['doc_count'] > 0
-        },
-    }
+    aggs = []
+
+    if results['hits']['total']['value'] <= 1:
+        results = es.search(
+            knn={
+                'field': 'embedding',
+                'query_vector': es.get_embedding(parsed_query),
+                'k': 10,
+                'num_candidates': 50,
+                **filters,
+            },
+            size=5,
+            from_=from_
+        )
+
+    else: # add aggs if not vector search
+        aggs = {
+            'Category': {
+                bucket['key']: bucket['doc_count']
+                for bucket in results['aggregations']['category-agg']['buckets']
+            },
+            'Year': {
+                bucket['key_as_string']: bucket['doc_count']
+                for bucket in results['aggregations']['year-agg']['buckets']
+                if bucket['doc_count'] > 0
+            },
+        }
     
     return render_template('index.html', results=results['hits']['hits'],
                             query=query, from_=from_,
